@@ -5,7 +5,20 @@
       "Bash(python -m pytest:*)",
       "Bash(python3 -m pytest:*)",
       "Bash(pip3 install:*)",
-      "Bash(RUN_BOT=0 .venv/bin/python:*)"
+      "Bash(RUN_BOT=0 .venv/bin/python:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh api:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(RUN_BOT=1 .venv/bin/python:*)",
+      "Bash(git add:*)",
+      "Bash(/Users/khabaroff/DEV/khabaroff-public-feedback-bot/.venv/bin/python:*)",
+      "Bash(xargs kill:*)",
+      "Bash(git status:*)",
+      "Bash(scp:*)",
+      "Bash(ssh:*)",
+      "Bash(gh secret set:*)",
+      "Bash(gh run list:*)"
     ]
   }
 }
