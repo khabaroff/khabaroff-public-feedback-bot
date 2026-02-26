@@ -62,7 +62,7 @@ openspec/       # Спецификации и change proposals
 | `OPENROUTER_API_KEY` | (опц.) Ключ OpenRouter для fallback |
 | `OPENROUTER_MODEL` | (опц.) Модель OpenRouter |
 
-## Запуск
+## Локальный запуск
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -73,4 +73,137 @@ python -m bot.main
 
 ```bash
 python -m pytest tests/ -v
+```
+
+## Деплой через Docker (рекомендуется)
+
+```bash
+git clone https://github.com/khabaroff/khabaroff-public-feedback-bot.git
+cd khabaroff-public-feedback-bot
+cp .env.example .env
+nano .env  # заполнить переменные
+
+docker compose up -d --build
+```
+
+Управление:
+
+```bash
+docker compose logs -f         # логи в реальном времени
+docker compose restart bot     # перезапуск
+docker compose down            # остановка
+docker compose up -d --build   # обновление после git pull
+```
+
+`restart: unless-stopped` в docker-compose.yml обеспечивает автоперезапуск при падении и при перезагрузке сервера.
+
+---
+
+## Деплой на сервер без Docker (Ubuntu/Debian)
+
+### 1. Подготовка сервера
+
+```bash
+sudo apt update && sudo apt install -y python3.11 python3.11-venv git
+```
+
+### 2. Клонирование и установка
+
+```bash
+cd /opt
+sudo git clone https://github.com/khabaroff/khabaroff-public-feedback-bot.git feedback-bot
+sudo chown -R $USER:$USER /opt/feedback-bot
+cd /opt/feedback-bot
+
+python3.11 -m venv .venv
+.venv/bin/pip install -e .
+```
+
+### 3. Конфигурация
+
+```bash
+cp .env.example .env   # или создать вручную
+nano .env               # заполнить все переменные
+```
+
+Проверка что конфигурация загружается:
+
+```bash
+RUN_BOT=0 .venv/bin/python -m bot.main
+```
+
+### 4. Systemd-сервис (автозапуск + перезапуск при падении)
+
+```bash
+sudo nano /etc/systemd/system/feedback-bot.service
+```
+
+Содержимое:
+
+```ini
+[Unit]
+Description=Khabaroff Feedback Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/feedback-bot
+ExecStart=/opt/feedback-bot/.venv/bin/python -m bot.main
+EnvironmentFile=/opt/feedback-bot/.env
+
+# Автоперезапуск при падении
+Restart=on-failure
+RestartSec=5
+
+# Не перезапускать чаще 5 раз за 60 секунд
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Логи
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=feedback-bot
+
+[Install]
+WantedBy=multi-user.target
+```
+
+> Замени `User=ubuntu` и `Group=ubuntu` на своего пользователя.
+
+### 5. Запуск сервиса
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable feedback-bot   # автозапуск при перезагрузке сервера
+sudo systemctl start feedback-bot
+```
+
+### 6. Управление
+
+```bash
+# Статус
+sudo systemctl status feedback-bot
+
+# Логи (последние 100 строк)
+sudo journalctl -u feedback-bot -n 100
+
+# Логи в реальном времени
+sudo journalctl -u feedback-bot -f
+
+# Перезапуск после обновления кода
+cd /opt/feedback-bot && git pull && sudo systemctl restart feedback-bot
+
+# Остановка
+sudo systemctl stop feedback-bot
+```
+
+### 7. Обновление бота
+
+```bash
+cd /opt/feedback-bot
+git pull origin main
+.venv/bin/pip install -e .
+sudo systemctl restart feedback-bot
 ```
