@@ -8,7 +8,7 @@ from bot.config import ConfigError, ContentError, load_content, load_settings
 from bot.db import ReviewRepository
 from bot.handlers import register_handlers
 from bot.llm import AzureOpenAIClient, FallbackLLMClient, OpenRouterClient
-from bot.notification import send_owner_notification
+from bot.notification import send_owner_notification, send_owner_text
 from bot.service import FeedbackService
 from bot.voice import AssemblyAIClient, VoicePipeline
 
@@ -66,13 +66,22 @@ async def _bootstrap() -> None:
     async def _notify_owner(review: dict) -> bool:
         return await send_owner_notification(bot, settings.owner_telegram_id, review)
 
+    async def _notify_owner_text(text: str) -> bool:
+        return await send_owner_text(bot, settings.owner_telegram_id, text)
+
     service = FeedbackService(
         content=content,
         voice_pipeline=voice_pipeline,
         llm_client=llm_client,
         repository=repository,
         notify_owner=_notify_owner,
+        notify_owner_text=_notify_owner_text,
     )
+
+    async def _abandon_checker() -> None:
+        while True:
+            await asyncio.sleep(15 * 60)  # check every 15 min
+            await service.check_abandoned_sessions(timeout_minutes=60)
 
     dispatcher = Dispatcher()
     register_handlers(
@@ -82,6 +91,7 @@ async def _bootstrap() -> None:
         video_note_path=settings.video_note_path,
     )
 
+    asyncio.create_task(_abandon_checker())
     await dispatcher.start_polling(bot)
 
 

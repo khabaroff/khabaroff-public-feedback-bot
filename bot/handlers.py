@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from bot.config import AppContent
@@ -23,6 +24,7 @@ def register_handlers(
         from aiogram import F, Router
         from aiogram.filters import CommandStart
         from aiogram.fsm.context import FSMContext
+        from aiogram.enums import ChatAction
         from aiogram.types import CallbackQuery, FSInputFile, Message
         from aiogram.utils.keyboard import InlineKeyboardBuilder
     except Exception as exc:  # pragma: no cover - runtime dependency
@@ -102,6 +104,7 @@ def register_handlers(
         service.start_session(user_id=user.id, username=user.username)
 
         await message.answer(T["greeting_intro"])
+        await asyncio.sleep(1)
         if video_note_path:
             try:
                 await message.answer_video_note(FSInputFile(video_note_path))
@@ -121,6 +124,7 @@ def register_handlers(
             reply_markup=_context_keyboard(set()),
         )
         await callback.answer()
+        await service.notify_session_started(callback.from_user.id)
 
     @router.callback_query(F.data.startswith("context:toggle:"))
     async def on_context_toggle(callback: CallbackQuery, state: FSMContext) -> None:
@@ -162,18 +166,12 @@ def register_handlers(
         if not captured:
             return
 
+        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
         try:
             questions = await service.analyze_and_select_questions(message.from_user.id)
         except SessionNotFoundError:
             await message.answer(_SESSION_LOST_MSG)
             await state.clear()
-            return
-
-        if not questions:
-            # Enough detail — skip to signature
-            await state.set_state(FeedbackStatesGroup.signature)
-            await message.answer(T["signature_prompt"])
-            await message.answer(T["signature_hint"])
             return
 
         await state.update_data(clarifying_questions=questions)
@@ -191,6 +189,7 @@ def register_handlers(
         questions = data.get("clarifying_questions", [])
         if len(questions) > 1:
             await state.set_state(FeedbackStatesGroup.clarifying_q2)
+            await message.answer("Спасибо! И еще один вопрос:")
             await message.answer(questions[1])
             return
 
@@ -218,6 +217,7 @@ def register_handlers(
         await state.set_state(FeedbackStatesGroup.generating)
         import random
         await message.answer(random.choice(content.thinking_phrases))
+        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
 
         try:
             _thinking, review = await service.generate_review(message.from_user.id, signature)

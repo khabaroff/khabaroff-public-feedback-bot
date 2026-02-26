@@ -25,10 +25,8 @@ def select_clarifying_questions(
     analysis: dict[str, bool],
     question_bank: dict[str, list[str]],
 ) -> list[str]:
-    if analysis.get("enough", False):
-        return []
-
     questions: list[str] = []
+    # First pass: missing fields
     for field in _PRIORITY_FIELDS:
         if not analysis.get(field, False):
             candidates = question_bank.get(field, [])
@@ -36,8 +34,17 @@ def select_clarifying_questions(
                 questions.append(random.choice(candidates))
         if len(questions) == 2:
             break
+    # Second pass: if <2, add from present fields to deepen
+    if len(questions) < 2:
+        for field in _PRIORITY_FIELDS:
+            if analysis.get(field, False):
+                candidates = question_bank.get(field, [])
+                if candidates:
+                    questions.append(random.choice(candidates))
+            if len(questions) == 2:
+                break
 
-    return questions
+    return questions[:2]
 
 
 try:

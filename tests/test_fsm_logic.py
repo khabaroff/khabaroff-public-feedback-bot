@@ -11,39 +11,41 @@ _QUESTION_BANK = {
 
 
 class TestSelectClarifyingQuestions(unittest.TestCase):
-    def test_enough_true_returns_empty(self) -> None:
-        analysis = {"context": True, "moment": True, "style": True, "enough": True}
-        self.assertEqual(select_clarifying_questions(analysis, _QUESTION_BANK), [])
-
-    def test_all_true_enough_true_returns_empty(self) -> None:
-        analysis = {"context": True, "moment": True, "style": True, "enough": True}
-        self.assertEqual(select_clarifying_questions(analysis, _QUESTION_BANK), [])
-
-    def test_moment_false_returns_moment_question(self) -> None:
-        analysis = {"context": True, "moment": False, "style": True, "enough": False}
-        result = select_clarifying_questions(analysis, _QUESTION_BANK)
-        self.assertEqual(len(result), 1)
-        self.assertIn(result[0], _QUESTION_BANK["moment"])
-
-    def test_moment_and_style_false_returns_two_questions(self) -> None:
-        analysis = {"context": True, "moment": False, "style": False, "enough": False}
-        result = select_clarifying_questions(analysis, _QUESTION_BANK)
-        self.assertEqual(len(result), 2)
-        self.assertIn(result[0], _QUESTION_BANK["moment"])
-        self.assertIn(result[1], _QUESTION_BANK["style"])
-
     def test_all_false_returns_two_prioritized(self) -> None:
-        analysis = {"context": False, "moment": False, "style": False, "enough": False}
+        analysis = {"context": False, "moment": False, "style": False}
         result = select_clarifying_questions(analysis, _QUESTION_BANK)
         self.assertEqual(len(result), 2)
         self.assertIn(result[0], _QUESTION_BANK["moment"])
         self.assertIn(result[1], _QUESTION_BANK["style"])
 
-    def test_only_context_false_returns_one(self) -> None:
-        analysis = {"context": False, "moment": True, "style": True, "enough": False}
+    def test_moment_and_style_false_returns_two(self) -> None:
+        analysis = {"context": True, "moment": False, "style": False}
         result = select_clarifying_questions(analysis, _QUESTION_BANK)
-        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result), 2)
+        self.assertIn(result[0], _QUESTION_BANK["moment"])
+        self.assertIn(result[1], _QUESTION_BANK["style"])
+
+    def test_only_moment_false_fills_from_present(self) -> None:
+        analysis = {"context": True, "moment": False, "style": True}
+        result = select_clarifying_questions(analysis, _QUESTION_BANK)
+        self.assertEqual(len(result), 2)
+        self.assertIn(result[0], _QUESTION_BANK["moment"])
+
+    def test_only_context_false_fills_from_present(self) -> None:
+        analysis = {"context": False, "moment": True, "style": True}
+        result = select_clarifying_questions(analysis, _QUESTION_BANK)
+        self.assertEqual(len(result), 2)
         self.assertIn(result[0], _QUESTION_BANK["context"])
+
+    def test_all_true_still_returns_two(self) -> None:
+        analysis = {"context": True, "moment": True, "style": True}
+        result = select_clarifying_questions(analysis, _QUESTION_BANK)
+        self.assertEqual(len(result), 2)
+
+    def test_always_max_two(self) -> None:
+        analysis = {"context": False, "moment": False, "style": False}
+        result = select_clarifying_questions(analysis, _QUESTION_BANK)
+        self.assertLessEqual(len(result), 2)
 
 
 class TestFlowEngine(unittest.TestCase):

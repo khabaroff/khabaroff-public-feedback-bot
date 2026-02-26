@@ -82,10 +82,15 @@ class TestAzureOpenAIClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
         self.assertNotIn("temperature", calls[0])
 
-    async def test_analyze_answer_parses_json_response(self) -> None:
+    async def test_analyze_answer_parses_json_with_questions(self) -> None:
         calls = []
         response_json = json.dumps(
-            {"context": True, "moment": False, "style": True, "enough": False}
+            {
+                "context": True,
+                "moment": False,
+                "style": True,
+                "questions": ["Q1 about moment", "Q2 about style"],
+            }
         )
 
         async def fake_post(url: str, headers: dict, payload: dict) -> dict:
@@ -109,17 +114,30 @@ class TestAzureOpenAIClient(unittest.IsolatedAsyncioTestCase):
 
         result = await client.analyze_answer("system analyze", "user text here")
 
-        self.assertEqual(result["context"], True)
-        self.assertEqual(result["moment"], False)
-        self.assertEqual(result["style"], True)
-        self.assertEqual(result["enough"], False)
+        self.assertTrue(result["context"])
+        self.assertFalse(result["moment"])
+        self.assertTrue(result["style"])
+        self.assertEqual(result["questions"], ["Q1 about moment", "Q2 about style"])
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["temperature"], 0.1)
-        self.assertEqual(calls[0]["messages"][1]["content"], "user text here")
+        self.assertEqual(calls[0]["temperature"], 0.3)
 
-    async def test_analyze_answer_returns_fallback_on_error(self) -> None:
+    async def test_analyze_answer_retries_on_bad_json(self) -> None:
+        attempt = {"count": 0}
+        good_json = json.dumps(
+            {"context": True, "moment": True, "style": True, "questions": ["Q1", "Q2"]}
+        )
+
         async def fake_post(url: str, headers: dict, payload: dict) -> dict:
-            return {"status": 500, "json": {"error": {"message": "boom"}}}
+            attempt["count"] += 1
+            if attempt["count"] <= 2:
+                return {
+                    "status": 200,
+                    "json": {"choices": [{"message": {"content": "not json at all"}}]},
+                }
+            return {
+                "status": 200,
+                "json": {"choices": [{"message": {"content": good_json}}]},
+            }
 
         client = AzureOpenAIClient(
             endpoint="https://example.openai.azure.com",
@@ -131,22 +149,35 @@ class TestAzureOpenAIClient(unittest.IsolatedAsyncioTestCase):
 
         result = await client.analyze_answer("system", "text")
 
-        self.assertFalse(result["context"])
-        self.assertFalse(result["moment"])
-        self.assertFalse(result["style"])
-        self.assertFalse(result["enough"])
+        self.assertEqual(attempt["count"], 3)
+        self.assertTrue(result["moment"])
+        self.assertEqual(result["questions"], ["Q1", "Q2"])
+
+    async def test_analyze_answer_raises_after_3_failures(self) -> None:
+        async def fake_post(url: str, headers: dict, payload: dict) -> dict:
+            return {
+                "status": 200,
+                "json": {"choices": [{"message": {"content": "broken"}}]},
+            }
+
+        client = AzureOpenAIClient(
+            endpoint="https://example.openai.azure.com",
+            api_key="secret",
+            deployment="gpt-4o",
+            api_version="2025-04-01-preview",
+            post_json=fake_post,
+        )
+
+        with self.assertRaises(RuntimeError):
+            await client.analyze_answer("system", "text")
 
     async def test_analyze_answer_handles_markdown_wrapped_json(self) -> None:
-        response_text = '```json\n{"context": true, "moment": true, "style": false, "enough": false}\n```'
+        response_text = '```json\n{"context": true, "moment": true, "style": false, "questions": ["Q1"]}\n```'
 
         async def fake_post(url: str, headers: dict, payload: dict) -> dict:
             return {
                 "status": 200,
-                "json": {
-                    "choices": [
-                        {"message": {"content": response_text}}
-                    ]
-                },
+                "json": {"choices": [{"message": {"content": response_text}}]},
             }
 
         client = AzureOpenAIClient(
@@ -162,7 +193,7 @@ class TestAzureOpenAIClient(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["context"])
         self.assertTrue(result["moment"])
         self.assertFalse(result["style"])
-        self.assertFalse(result["enough"])
+        self.assertEqual(result["questions"], ["Q1"])
 
 
 class TestOpenRouterClient(unittest.IsolatedAsyncioTestCase):

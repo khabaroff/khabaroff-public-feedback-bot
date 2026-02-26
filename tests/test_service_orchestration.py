@@ -30,15 +30,15 @@ class FakeVoicePipeline:
 class FakeLLMClient:
     def __init__(self) -> None:
         self.generated_payload: dict[str, Any] | None = None
-        self.analyze_result: dict[str, bool] = {
-            "context": False, "moment": False, "style": False, "enough": False,
+        self.analyze_result: dict[str, Any] = {
+            "context": False, "moment": False, "style": False, "questions": [],
         }
 
     async def generate_review(self, prompt: str, payload: dict[str, Any]) -> str:
         self.generated_payload = payload
         return "Draft review"
 
-    async def analyze_answer(self, system_prompt: str, answer_text: str) -> dict[str, bool]:
+    async def analyze_answer(self, system_prompt: str, answer_text: str) -> dict[str, Any]:
         return dict(self.analyze_result)
 
 
@@ -181,10 +181,13 @@ class TestServiceOrchestration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(review_id, 1)
         self.assertFalse(stored["notified"])
 
-    async def test_analyze_and_select_questions_enough_true(self) -> None:
+    async def test_analyze_uses_llm_questions(self) -> None:
         voice = FakeVoicePipeline()
         llm = FakeLLMClient()
-        llm.analyze_result = {"context": True, "moment": True, "style": True, "enough": True}
+        llm.analyze_result = {
+            "context": True, "moment": False, "style": False,
+            "questions": ["LLM Q1 about moment", "LLM Q2 about style"],
+        }
         repo = FakeRepo(rows={})
         notifier = FakeNotifier()
 
@@ -192,15 +195,20 @@ class TestServiceOrchestration(unittest.IsolatedAsyncioTestCase):
         svc.start_session(user_id=20, username="demo")
         svc.set_contexts(20, ["work"])
         svc.set_period(20, "recent")
-        svc.add_text_answer(20, "open", "Detailed answer with context, moment, and style")
+        svc.add_text_answer(20, "open", "Generic answer")
 
         questions = await svc.analyze_and_select_questions(20)
-        self.assertEqual(questions, [])
+        self.assertEqual(len(questions), 2)
+        self.assertEqual(questions[0], "LLM Q1 about moment")
+        self.assertEqual(questions[1], "LLM Q2 about style")
 
-    async def test_analyze_and_select_questions_moment_missing(self) -> None:
+    async def test_analyze_falls_back_to_bank_when_no_llm_questions(self) -> None:
         voice = FakeVoicePipeline()
         llm = FakeLLMClient()
-        llm.analyze_result = {"context": True, "moment": False, "style": True, "enough": False}
+        llm.analyze_result = {
+            "context": True, "moment": False, "style": True,
+            "questions": [],
+        }
         repo = FakeRepo(rows={})
         notifier = FakeNotifier()
 
@@ -211,13 +219,15 @@ class TestServiceOrchestration(unittest.IsolatedAsyncioTestCase):
         svc.add_text_answer(21, "open", "Generic answer")
 
         questions = await svc.analyze_and_select_questions(21)
-        self.assertEqual(len(questions), 1)
-        self.assertIn(questions[0], self._content().clarify_questions["moment"])
+        self.assertEqual(len(questions), 2)
 
-    async def test_analyze_and_select_questions_collects_voice(self) -> None:
+    async def test_analyze_always_returns_two_questions(self) -> None:
         voice = FakeVoicePipeline()
         llm = FakeLLMClient()
-        llm.analyze_result = {"context": True, "moment": True, "style": True, "enough": True}
+        llm.analyze_result = {
+            "context": True, "moment": True, "style": True,
+            "questions": [],
+        }
         repo = FakeRepo(rows={})
         notifier = FakeNotifier()
 
@@ -225,12 +235,30 @@ class TestServiceOrchestration(unittest.IsolatedAsyncioTestCase):
         svc.start_session(user_id=22, username="demo")
         svc.set_contexts(22, ["work"])
         svc.set_period(22, "recent")
-        await svc.add_voice_answer(22, "open", b"voice-bytes")
+        svc.add_text_answer(22, "open", "Very detailed answer")
 
         questions = await svc.analyze_and_select_questions(22)
-        self.assertEqual(questions, [])
-        # Voice transcripts should have been collected
-        session = svc.sessions[22]
+        self.assertEqual(len(questions), 2)
+
+    async def test_analyze_collects_voice_before_analysis(self) -> None:
+        voice = FakeVoicePipeline()
+        llm = FakeLLMClient()
+        llm.analyze_result = {
+            "context": False, "moment": False, "style": False,
+            "questions": ["Q1", "Q2"],
+        }
+        repo = FakeRepo(rows={})
+        notifier = FakeNotifier()
+
+        svc = FeedbackService(content=self._content(), voice_pipeline=voice, llm_client=llm, repository=repo, notify_owner=notifier)
+        svc.start_session(user_id=23, username="demo")
+        svc.set_contexts(23, ["work"])
+        svc.set_period(23, "recent")
+        await svc.add_voice_answer(23, "open", b"voice-bytes")
+
+        questions = await svc.analyze_and_select_questions(23)
+        self.assertEqual(len(questions), 2)
+        session = svc.sessions[23]
         self.assertEqual(len(session.pending_transcripts), 0)
 
 

@@ -61,6 +61,8 @@ class TestDBAndNotification(unittest.TestCase):
         self.assertIn("ОТВЕТЫ ЧЕЛОВЕКА", message)
         self.assertIn("ИТОГОВЫЙ ОТЗЫВ", message)
         self.assertIn("Финал", message)
+        self.assertIn("@demo", message)
+        self.assertIn("ID: 42", message)
 
 
 if __name__ == "__main__":

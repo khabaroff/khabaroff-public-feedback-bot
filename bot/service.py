@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import random
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -10,6 +12,8 @@ from bot.fsm import select_clarifying_questions
 from bot.llm import validate_review_text
 from bot.voice import PendingTranscript
 
+logger = logging.getLogger(__name__)
+
 
 class SessionNotFoundError(KeyError):
     """Raised when an operation references unknown user session."""
@@ -18,6 +22,9 @@ class SessionNotFoundError(KeyError):
 @dataclass
 class FeedbackSession:
     engine: FeedbackFlowEngine
+    started_at: float = field(default_factory=time.time)
+    completed: bool = False
+    abandon_notified: bool = False
     pending_transcripts: list[PendingTranscript] = field(default_factory=list)
 
 
@@ -29,18 +36,44 @@ class FeedbackService:
         llm_client: Any,
         repository: Any,
         notify_owner: Callable[[dict[str, Any]], Awaitable[bool]],
+        notify_owner_text: Callable[[str], Awaitable[bool]] | None = None,
     ) -> None:
         self.content = content
         self.voice_pipeline = voice_pipeline
         self.llm_client = llm_client
         self.repository = repository
         self.notify_owner = notify_owner
+        self.notify_owner_text = notify_owner_text
         self.sessions: dict[int, FeedbackSession] = {}
 
     def start_session(self, user_id: int, username: str | None = None) -> None:
         self.sessions[user_id] = FeedbackSession(
             engine=FeedbackFlowEngine(user_id=user_id, username=username)
         )
+
+    async def notify_session_started(self, user_id: int) -> None:
+        session = self.sessions.get(user_id)
+        if not session or not self.notify_owner_text:
+            return
+        from bot.notification import format_session_started
+        text = format_session_started(user_id, session.engine.username)
+        await self.notify_owner_text(text)
+
+    async def check_abandoned_sessions(self, timeout_minutes: int = 60) -> None:
+        if not self.notify_owner_text:
+            return
+        from bot.notification import format_session_abandoned
+        now = time.time()
+        for user_id, session in list(self.sessions.items()):
+            if session.completed or session.abandon_notified:
+                continue
+            elapsed_min = int((now - session.started_at) / 60)
+            if elapsed_min >= timeout_minutes:
+                text = format_session_abandoned(
+                    user_id, session.engine.username, elapsed_min
+                )
+                await self.notify_owner_text(text)
+                session.abandon_notified = True
 
     def _session(self, user_id: int) -> FeedbackSession:
         session = self.sessions.get(user_id)
@@ -86,7 +119,21 @@ class FeedbackService:
         analysis = await self.llm_client.analyze_answer(
             self.content.analyze_prompt, answer_text
         )
-        return select_clarifying_questions(analysis, self.content.clarify_questions)
+
+        # Use LLM-generated questions; fallback to question bank
+        llm_questions = analysis.get("questions", [])
+        if isinstance(llm_questions, list) and len(llm_questions) >= 2:
+            return llm_questions[:2]
+        # Fallback: LLM returned <2 questions — fill from bank
+        fallback = select_clarifying_questions(analysis, self.content.clarify_questions)
+        # Merge: keep whatever LLM gave, fill rest from bank
+        merged: list[str] = list(llm_questions) if isinstance(llm_questions, list) else []
+        for q in fallback:
+            if len(merged) >= 2:
+                break
+            if q not in merged:
+                merged.append(q)
+        return merged[:2]
 
     async def generate_review(self, user_id: int, signature: str) -> tuple[str, str]:
         session = self._session(user_id)
@@ -131,6 +178,7 @@ class FeedbackService:
         session = self._session(user_id)
         session.engine.approve_review()
         session.engine.set_public_permission(is_public)
+        session.completed = True
         payload = session.engine.to_review_record()
 
         review_id = self.repository.save_review(payload)
