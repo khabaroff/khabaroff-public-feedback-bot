@@ -56,6 +56,16 @@ class FeedbackFlowEngine:
     def set_public_permission(self, is_public: bool) -> None:
         self.is_public = bool(is_public)
 
+    def get_raw_answers_text(self) -> str:
+        """Return all raw answer texts joined as-is."""
+        return "\n\n".join(entry.text for entry in self.answers if entry.text.strip())
+
+    def use_raw_answers(self) -> str:
+        """Set raw answers as the final review (no LLM processing)."""
+        raw = self.get_raw_answers_text()
+        self.review_final = raw
+        return raw
+
     def build_generation_payload(self) -> dict[str, Any]:
         return {
             "context": list(self.contexts),

@@ -63,6 +63,7 @@ def register_handlers(
         builder = InlineKeyboardBuilder()
         builder.button(text=T["review_ok_button"], callback_data="review:accept")
         builder.button(text=T["review_edit_button"], callback_data="review:edit")
+        builder.button(text=T["review_raw_button"], callback_data="review:raw")
         builder.adjust(1)
         return builder.as_markup()
 
@@ -262,6 +263,25 @@ def register_handlers(
             T["publish_prompt"],
             reply_markup=_publish_keyboard(),
         )
+        await callback.answer()
+
+    @router.callback_query(F.data == "review:raw")
+    async def on_review_raw(callback: CallbackQuery, state: FSMContext) -> None:
+        try:
+            service.use_raw_answers(callback.from_user.id)
+            await service.complete_review(callback.from_user.id, is_public=False)
+        except SessionNotFoundError:
+            await callback.message.answer(_SESSION_LOST_MSG)
+            await state.clear()
+            await callback.answer()
+            return
+        except Exception as exc:
+            await callback.message.answer(f"Ошибка завершения отзыва: {exc}")
+            await callback.answer()
+            return
+
+        await callback.message.answer(T["final_raw"])
+        await state.clear()
         await callback.answer()
 
     @router.callback_query(F.data.startswith("publish:"))

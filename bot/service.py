@@ -167,6 +167,10 @@ class FeedbackService:
         thinking = random.choice(self.content.thinking_phrases)
         return thinking, review_text
 
+    def use_raw_answers(self, user_id: int) -> str:
+        session = self._session(user_id)
+        return session.engine.use_raw_answers()
+
     def apply_manual_edit(self, user_id: int, review_text: str) -> str:
         session = self._session(user_id)
         session.engine.submit_manual_edit(review_text)
