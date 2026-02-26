@@ -51,10 +51,12 @@ def build_generation_payload(
 
 
 def validate_review_text(text: str) -> list[str]:
+    import re
+
     lowered = text.lower()
     violations: list[str] = []
     for token in _BANNED_OUTPUT_TOKENS:
-        if token in lowered:
+        if re.search(rf"\b{re.escape(token)}\b", lowered):
             violations.append(token)
     return violations
 

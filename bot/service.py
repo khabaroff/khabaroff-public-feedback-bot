@@ -101,15 +101,20 @@ class FeedbackService:
             session.pending_transcripts = []
 
         payload = session.engine.build_generation_payload()
-        review_text = await self.llm_client.generate_review(
-            self.content.generate_prompt, payload
-        )
-        violations = validate_review_text(review_text)
-        if violations:
-            raise ValueError(
-                "Generated review violates output constraints: "
-                + ", ".join(sorted(set(violations)))
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            review_text = await self.llm_client.generate_review(
+                self.content.generate_prompt, payload
             )
+            violations = validate_review_text(review_text)
+            if not violations:
+                break
+            if attempt == max_attempts - 1:
+                raise ValueError(
+                    "Generated review violates output constraints: "
+                    + ", ".join(sorted(set(violations)))
+                )
 
         session.engine.set_generated_review(review_text)
         thinking = random.choice(self.content.thinking_phrases)

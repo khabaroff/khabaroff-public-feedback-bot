@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import random
 from typing import Any
 
 from bot.config import AppContent
 from bot.fsm import FeedbackStatesGroup
-from bot.service import FeedbackService
+from bot.service import FeedbackService, SessionNotFoundError
 from bot.voice import download_telegram_voice_bytes
+
+_SESSION_LOST_MSG = "Сессия потерялась (бот перезапускался). Нажми /start чтобы начать заново."
 
 _CONTEXT_KEYS = ["study", "work", "life", "other"]
 _PERIOD_KEYS = ["recent", "medium", "old", "unknown"]
@@ -161,11 +162,12 @@ def register_handlers(
         if not captured:
             return
 
-        # Show thinking indicator while analyzing
-        thinking = random.choice(content.thinking_phrases)
-        await message.answer(thinking)
-
-        questions = await service.analyze_and_select_questions(message.from_user.id)
+        try:
+            questions = await service.analyze_and_select_questions(message.from_user.id)
+        except SessionNotFoundError:
+            await message.answer(_SESSION_LOST_MSG)
+            await state.clear()
+            return
 
         if not questions:
             # Enough detail — skip to signature
@@ -214,14 +216,20 @@ def register_handlers(
             return
 
         await state.set_state(FeedbackStatesGroup.generating)
+        import random
+        await message.answer(random.choice(content.thinking_phrases))
+
         try:
-            thinking, review = await service.generate_review(message.from_user.id, signature)
+            _thinking, review = await service.generate_review(message.from_user.id, signature)
+        except SessionNotFoundError:
+            await message.answer(_SESSION_LOST_MSG)
+            await state.clear()
+            return
         except Exception as exc:
             await state.set_state(FeedbackStatesGroup.signature)
             await message.answer(f"Не удалось сгенерировать отзыв: {exc}")
             return
 
-        await message.answer(thinking)
         await message.answer(
             f"{T['review_ready']}\n\n{review}\n\n— {signature}",
             reply_markup=_review_keyboard(),
@@ -261,6 +269,11 @@ def register_handlers(
         is_public = callback.data.endswith("yes")
         try:
             await service.complete_review(callback.from_user.id, is_public=is_public)
+        except SessionNotFoundError:
+            await callback.message.answer(_SESSION_LOST_MSG)
+            await state.clear()
+            await callback.answer()
+            return
         except Exception as exc:
             await callback.message.answer(f"Ошибка завершения отзыва: {exc}")
             await callback.answer()
