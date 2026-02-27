@@ -142,7 +142,7 @@ sudo nano /etc/systemd/system/feedback-bot.service
 
 ```ini
 [Unit]
-Description=Khabaroff Feedback Telegram Bot
+Description=Feedback Telegram Bot
 After=network.target
 
 [Service]

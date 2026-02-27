@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Telegram feedback bot for Sergey Khabarov. Collects free-form text/voice answers, analyzes them via LLM, asks dynamic clarifying questions, and generates polished reviews.
+Telegram feedback bot. Collects free-form text/voice answers, analyzes them via LLM, asks dynamic clarifying questions, and generates polished reviews.
 
 ## Architecture
 
