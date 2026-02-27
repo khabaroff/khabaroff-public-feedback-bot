@@ -78,13 +78,38 @@ def format_session_abandoned(user_id: int, username: str | None, minutes: int) -
     )
 
 
+_TG_MSG_LIMIT = 4096
+
+
 async def send_owner_notification(bot: Any, owner_id: int, review: Mapping[str, Any]) -> bool:
     try:
-        await bot.send_message(chat_id=owner_id, text=format_owner_notification(review))
+        text = format_owner_notification(review)
+        if len(text) <= _TG_MSG_LIMIT:
+            await bot.send_message(chat_id=owner_id, text=text)
+        else:
+            # Split into chunks respecting the limit
+            for chunk in _split_message(text, _TG_MSG_LIMIT):
+                await bot.send_message(chat_id=owner_id, text=chunk)
         return True
     except Exception as exc:
-        logger.error("Failed to send owner notification: %s", exc)
+        logger.error("Failed to send owner notification: %s", exc, exc_info=True)
         return False
+
+
+def _split_message(text: str, limit: int) -> list[str]:
+    """Split a long message into chunks, breaking at newlines when possible."""
+    chunks: list[str] = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+        # Find a newline near the limit to break at
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    return chunks
 
 
 async def send_owner_text(bot: Any, owner_id: int, text: str) -> bool:

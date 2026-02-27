@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from bot.config import AppContent
 from bot.fsm import FeedbackStatesGroup
 from bot.service import FeedbackService, SessionNotFoundError
 from bot.voice import download_telegram_voice_bytes
+
+logger = logging.getLogger(__name__)
 
 _SESSION_LOST_MSG = "Сессия потерялась (бот перезапускался). Нажми /start чтобы начать заново."
 
@@ -269,17 +272,22 @@ def register_handlers(
     async def on_review_raw(callback: CallbackQuery, state: FSMContext) -> None:
         try:
             service.use_raw_answers(callback.from_user.id)
-            await service.complete_review(callback.from_user.id, is_public=False)
+            _review_id, stored = await service.complete_review(
+                callback.from_user.id, is_public=False,
+            )
         except SessionNotFoundError:
             await callback.message.answer(_SESSION_LOST_MSG)
             await state.clear()
             await callback.answer()
             return
         except Exception as exc:
+            logger.error("review:raw failed for %s: %s", callback.from_user.id, exc, exc_info=True)
             await callback.message.answer(f"Ошибка завершения отзыва: {exc}")
             await callback.answer()
             return
 
+        if not stored.get("notified"):
+            logger.warning("Owner notification failed for review (raw) user=%s", callback.from_user.id)
         await callback.message.answer(T["final_raw"])
         await state.clear()
         await callback.answer()
@@ -288,17 +296,22 @@ def register_handlers(
     async def on_publish_permission(callback: CallbackQuery, state: FSMContext) -> None:
         is_public = callback.data.endswith("yes")
         try:
-            await service.complete_review(callback.from_user.id, is_public=is_public)
+            _review_id, stored = await service.complete_review(
+                callback.from_user.id, is_public=is_public,
+            )
         except SessionNotFoundError:
             await callback.message.answer(_SESSION_LOST_MSG)
             await state.clear()
             await callback.answer()
             return
         except Exception as exc:
+            logger.error("publish failed for %s: %s", callback.from_user.id, exc, exc_info=True)
             await callback.message.answer(f"Ошибка завершения отзыва: {exc}")
             await callback.answer()
             return
 
+        if not stored.get("notified"):
+            logger.warning("Owner notification failed for review user=%s", callback.from_user.id)
         final_text = T["final_public"] if is_public else T["final_private"]
         await callback.message.answer(final_text)
         await state.clear()

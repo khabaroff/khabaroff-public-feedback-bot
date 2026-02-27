@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from bot.db import ReviewRepository
-from bot.notification import format_owner_notification
+from bot.notification import _split_message, format_owner_notification
 
 
 def _review_payload() -> dict:
@@ -63,6 +63,21 @@ class TestDBAndNotification(unittest.TestCase):
         self.assertIn("Финал", message)
         self.assertIn("@demo", message)
         self.assertIn("ID: 42", message)
+
+
+    def test_split_message_short(self) -> None:
+        chunks = _split_message("short", 4096)
+        self.assertEqual(chunks, ["short"])
+
+    def test_split_message_long(self) -> None:
+        text = "line1\nline2\nline3\n" + "x" * 5000
+        chunks = _split_message(text, 4096)
+        self.assertTrue(len(chunks) > 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 4096)
+        reassembled = "\n".join(chunks)
+        self.assertIn("line1", reassembled)
+        self.assertIn("x" * 100, reassembled)
 
 
 if __name__ == "__main__":

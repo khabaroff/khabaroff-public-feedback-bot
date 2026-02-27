@@ -262,5 +262,29 @@ class TestServiceOrchestration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session.pending_transcripts), 0)
 
 
+    async def test_raw_review_notifies_owner(self) -> None:
+        voice = FakeVoicePipeline()
+        llm = FakeLLMClient()
+        repo = FakeRepo(rows={})
+        notifier = FakeNotifier()
+
+        svc = FeedbackService(content=self._content(), voice_pipeline=voice, llm_client=llm, repository=repo, notify_owner=notifier)
+        svc.start_session(user_id=40, username="rawuser")
+        svc.set_contexts(40, ["work"])
+        svc.set_period(40, "recent")
+        svc.add_text_answer(40, "open", "My raw answer")
+        svc.add_text_answer(40, "clarify_1", "Clarification")
+        await svc.generate_review(user_id=40, signature="Test User")
+
+        # Use raw answers instead of LLM-generated text
+        raw = svc.use_raw_answers(40)
+        self.assertIn("My raw answer", raw)
+
+        review_id, stored = await svc.complete_review(user_id=40, is_public=False)
+        self.assertTrue(stored["notified"])
+        self.assertIsNotNone(notifier.called_with)
+        self.assertEqual(notifier.called_with["review_final"], raw)
+
+
 if __name__ == "__main__":
     unittest.main()
