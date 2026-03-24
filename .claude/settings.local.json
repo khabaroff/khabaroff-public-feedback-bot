@@ -18,7 +18,12 @@
       "Bash(scp:*)",
       "Bash(ssh:*)",
       "Bash(gh secret set:*)",
-      "Bash(gh run list:*)"
+      "Bash(gh run list:*)",
+      "Bash(pip install:*)",
+      "Bash(python3 -m venv:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(git pull:*)",
+      "Bash(gh repo edit:*)"
     ]
   }
 }

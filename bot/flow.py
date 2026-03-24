@@ -77,6 +77,21 @@ class FeedbackFlowEngine:
             "signature": self.signature,
         }
 
+    def to_draft_fields(self) -> dict[str, Any]:
+        """Return current state as dict suitable for update_review_fields."""
+        return {
+            "context": list(self.contexts),
+            "period": self.period,
+            "answers_raw": [
+                {"key": item.key, "source": item.source, "text": item.text}
+                for item in self.answers
+            ],
+            "review_generated": self.review_generated,
+            "review_final": self.review_final or self.review_generated,
+            "signature": self.signature,
+            "is_public": bool(self.is_public) if self.is_public is not None else False,
+        }
+
     def to_review_record(self) -> dict[str, Any]:
         return {
             "telegram_user_id": str(self.user_id),

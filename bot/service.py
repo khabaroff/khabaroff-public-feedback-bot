@@ -26,6 +26,7 @@ class FeedbackSession:
     completed: bool = False
     abandon_notified: bool = False
     pending_transcripts: list[PendingTranscript] = field(default_factory=list)
+    draft_id: int | None = None
 
 
 class FeedbackService:
@@ -47,9 +48,26 @@ class FeedbackService:
         self.sessions: dict[int, FeedbackSession] = {}
 
     def start_session(self, user_id: int, username: str | None = None) -> None:
-        self.sessions[user_id] = FeedbackSession(
-            engine=FeedbackFlowEngine(user_id=user_id, username=username)
-        )
+        engine = FeedbackFlowEngine(user_id=user_id, username=username)
+        session = FeedbackSession(engine=engine)
+        try:
+            draft_id = self.repository.save_review({
+                "telegram_user_id": str(user_id),
+                "telegram_username": username or "",
+                "context": [],
+                "period": "",
+                "answers_raw": [],
+                "review_generated": "",
+                "review_final": "",
+                "signature": "",
+                "is_public": False,
+                "notified": False,
+                "status": "draft",
+            })
+            session.draft_id = draft_id
+        except Exception:
+            logger.warning("Failed to create draft for user %s", user_id, exc_info=True)
+        self.sessions[user_id] = session
 
     async def notify_session_started(self, user_id: int) -> None:
         session = self.sessions.get(user_id)
@@ -69,8 +87,10 @@ class FeedbackService:
                 continue
             elapsed_min = int((now - session.started_at) / 60)
             if elapsed_min >= timeout_minutes:
+                partial_data = session.engine.to_draft_fields()
                 text = format_session_abandoned(
-                    user_id, session.engine.username, elapsed_min
+                    user_id, session.engine.username, elapsed_min,
+                    partial_data=partial_data,
                 )
                 await self.notify_owner_text(text)
                 session.abandon_notified = True
@@ -81,14 +101,31 @@ class FeedbackService:
             raise SessionNotFoundError(f"No active session for user {user_id}")
         return session
 
+    def _save_draft(self, session: FeedbackSession) -> None:
+        if session.draft_id is None:
+            return
+        try:
+            fields = session.engine.to_draft_fields()
+            self.repository.update_review_fields(session.draft_id, **fields)
+        except Exception:
+            logger.warning(
+                "Failed to update draft %s", session.draft_id, exc_info=True
+            )
+
     def set_contexts(self, user_id: int, contexts: list[str]) -> None:
-        self._session(user_id).engine.set_contexts(contexts)
+        session = self._session(user_id)
+        session.engine.set_contexts(contexts)
+        self._save_draft(session)
 
     def set_period(self, user_id: int, period: str) -> None:
-        self._session(user_id).engine.set_period(period)
+        session = self._session(user_id)
+        session.engine.set_period(period)
+        self._save_draft(session)
 
     def add_text_answer(self, user_id: int, answer_key: str, text: str) -> None:
-        self._session(user_id).engine.add_answer(answer_key, "text", text)
+        session = self._session(user_id)
+        session.engine.add_answer(answer_key, "text", text)
+        self._save_draft(session)
 
     async def add_voice_answer(
         self, user_id: int, answer_key: str, audio_bytes: bytes
@@ -96,6 +133,7 @@ class FeedbackService:
         session = self._session(user_id)
         pending = await self.voice_pipeline.register_voice_answer(answer_key, audio_bytes)
         session.pending_transcripts.append(pending)
+        self._save_draft(session)
         return self.content.texts.get(
             "voice_ack", "🎙 Получил, расшифровываю в фоне — продолжаем."
         )
@@ -111,6 +149,7 @@ class FeedbackService:
             for key, transcript in collected.transcripts.items():
                 session.engine.add_answer(key, "voice_transcript", transcript)
             session.pending_transcripts = []
+            self._save_draft(session)
 
         # Build answer text from all answers so far
         answer_parts = [entry.text for entry in session.engine.answers]
@@ -164,16 +203,20 @@ class FeedbackService:
                 )
 
         session.engine.set_generated_review(review_text)
+        self._save_draft(session)
         thinking = random.choice(self.content.thinking_phrases)
         return thinking, review_text
 
     def use_raw_answers(self, user_id: int) -> str:
         session = self._session(user_id)
-        return session.engine.use_raw_answers()
+        raw = session.engine.use_raw_answers()
+        self._save_draft(session)
+        return raw
 
     def apply_manual_edit(self, user_id: int, review_text: str) -> str:
         session = self._session(user_id)
         session.engine.submit_manual_edit(review_text)
+        self._save_draft(session)
         return session.engine.review_final
 
     async def complete_review(
@@ -183,10 +226,17 @@ class FeedbackService:
         session.engine.approve_review()
         session.engine.set_public_permission(is_public)
         session.completed = True
-        payload = session.engine.to_review_record()
 
-        review_id = self.repository.save_review(payload)
-        stored = self.repository.get_review(review_id) or payload
+        if session.draft_id is not None:
+            fields = session.engine.to_draft_fields()
+            fields["status"] = "completed"
+            self.repository.update_review_fields(session.draft_id, **fields)
+            review_id = session.draft_id
+        else:
+            payload = session.engine.to_review_record()
+            review_id = self.repository.save_review(payload)
+
+        stored = self.repository.get_review(review_id) or session.engine.to_review_record()
 
         delivered = await self.notify_owner(stored)
         if delivered:

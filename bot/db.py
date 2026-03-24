@@ -27,15 +27,27 @@ class ReviewRepository:
                     signature TEXT,
                     is_public INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
-                    notified INTEGER NOT NULL DEFAULT 0
+                    notified INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'completed'
                 )
                 """
+            )
+            self._migrate_add_status_column(conn)
+
+    def _migrate_add_status_column(self, conn: sqlite3.Connection) -> None:
+        cursor = conn.execute("PRAGMA table_info(reviews)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "status" not in columns:
+            conn.execute(
+                "ALTER TABLE reviews ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
             )
 
     def save_review(self, payload: dict[str, Any]) -> int:
         created_at = payload.get("created_at")
         if not created_at:
             created_at = datetime.now(timezone.utc).isoformat()
+
+        status = payload.get("status", "completed")
 
         with self._connect() as conn:
             cursor = conn.execute(
@@ -51,8 +63,9 @@ class ReviewRepository:
                     signature,
                     is_public,
                     created_at,
-                    notified
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    notified,
+                    status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(payload.get("telegram_user_id", "")),
@@ -66,6 +79,7 @@ class ReviewRepository:
                     int(bool(payload.get("is_public", False))),
                     str(created_at),
                     int(bool(payload.get("notified", False))),
+                    str(status),
                 ),
             )
             return int(cursor.lastrowid)
@@ -98,6 +112,7 @@ class ReviewRepository:
             "is_public",
             "notified",
             "telegram_username",
+            "status",
         }
         updates: list[str] = []
         values: list[Any] = []
@@ -133,4 +148,5 @@ class ReviewRepository:
         )
         raw["is_public"] = bool(raw.get("is_public"))
         raw["notified"] = bool(raw.get("notified"))
+        raw.setdefault("status", "completed")
         return raw

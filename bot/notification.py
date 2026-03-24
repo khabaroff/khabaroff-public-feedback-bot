@@ -66,16 +66,41 @@ def format_session_started(user_id: int, username: str | None) -> str:
     return f"👋 Кто-то начал оставлять отзыв\n\n💬 Telegram: {who}"
 
 
-def format_session_abandoned(user_id: int, username: str | None, minutes: int) -> str:
+def format_session_abandoned(
+    user_id: int,
+    username: str | None,
+    minutes: int,
+    partial_data: Mapping[str, Any] | None = None,
+) -> str:
     if username:
         who = f"@{username} (ID: {user_id})"
     else:
         who = f"ID: {user_id}"
-    return (
+    text = (
         f"⏰ Незавершенный отзыв\n\n"
         f"💬 Telegram: {who}\n"
         f"⏱ Прошло {minutes} мин. с начала — отзыв не был завершен."
     )
+    if partial_data:
+        contexts = partial_data.get("context", [])
+        if isinstance(contexts, list) and contexts:
+            text += f"\n📋 Контекст: {', '.join(str(c) for c in contexts)}"
+        period = str(partial_data.get("period", "")).strip()
+        if period:
+            text += f"\n📅 Период: {period}"
+        answers = partial_data.get("answers_raw", [])
+        if isinstance(answers, list) and answers:
+            lines = []
+            for idx, item in enumerate(answers, start=1):
+                if not isinstance(item, dict):
+                    continue
+                key = str(item.get("key", f"answer_{idx}"))
+                answer_text = str(item.get("text", "")).strip()
+                if answer_text:
+                    lines.append(f"  {idx}. {key}: {answer_text}")
+            if lines:
+                text += "\n\n📝 Собранные ответы:\n" + "\n".join(lines)
+    return text
 
 
 _TG_MSG_LIMIT = 4096
