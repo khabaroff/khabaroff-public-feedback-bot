@@ -8,12 +8,12 @@ Telegram feedback bot. Collects free-form text/voice answers, analyzes them via 
 
 - **bot/handlers.py** — aiogram 3.x handlers, all user-facing text from `content.texts` (no hardcoded strings)
 - **bot/fsm.py** — FSM states (`FeedbackStatesGroup`) and `select_clarifying_questions()` logic
-- **bot/service.py** — `FeedbackService` orchestrates sessions, voice collection, LLM calls
+- **bot/service.py** — `FeedbackService` orchestrates sessions, voice collection, LLM calls; saves draft to DB at every step (`_save_draft`), promotes to `completed` on `complete_review`
 - **bot/llm.py** — `AzureOpenAIClient`, `OpenRouterClient`, `FallbackLLMClient` with `generate_review`, `rephrase_review`, `analyze_answer` methods
 - **bot/voice.py** — `AssemblyAIClient` (language: `ru`) + `VoicePipeline`
-- **bot/flow.py** — Pure data engine `FeedbackFlowEngine` (no Telegram deps)
+- **bot/flow.py** — Pure data engine `FeedbackFlowEngine` (no Telegram deps); `to_draft_fields()` for incremental DB saves
 - **bot/config.py** — `Settings` (env vars), `AppContent` (texts, prompts, question bank)
-- **bot/db.py** — SQLite `ReviewRepository`
+- **bot/db.py** — SQLite `ReviewRepository`; `status` column (`draft`/`completed`) with auto-migration for existing DBs
 
 ## Key Patterns
 
